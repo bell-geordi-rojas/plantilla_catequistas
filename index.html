@@ -234,6 +234,7 @@ async function makePdf(){
   $("pdf").disabled = true;
   try {
     await ensureFont();
+    if (!window.jspdf) throw new Error("No cargó la librería del PDF. Revisa tu conexión a internet y recarga la página.");
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({ unit: "pt", format: [BW, BH], orientation: "portrait", compress: true });
     const c = document.createElement("canvas");
@@ -245,13 +246,27 @@ async function makePdf(){
       pdf.addImage(c.toDataURL("image/jpeg", 0.93), "JPEG", 0, 0, BW, BH);
     }
     const blob = pdf.output("blob");
-    const downloads = await claude.use("downloads");
-    if (!downloads) { st.className = "status err"; st.textContent = "Esta vista no permite descargar archivos. Abre la página desde claude.ai."; return; }
     const filename = people.length === 1 ? `Portada ${people[0].raw}.pdf` : `Portadas catequistas (${people.length}).pdf`;
-    await downloads.save({ filename, data: blob });
+    // Dentro de claude.ai la descarga pasa por su sistema; en cualquier otro navegador se descarga de forma normal.
+    let downloads = null;
+    try { if (window.claude && typeof window.claude.use === "function") downloads = await window.claude.use("downloads"); } catch (e) { downloads = null; }
+    if (downloads) {
+      try { await downloads.save({ filename, data: blob }); }
+      catch (e1) {
+        // Si no acepta un Blob, se intenta con los bytes del archivo
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        try { await downloads.save({ filename, data: bytes }); }
+        catch (e2) { throw new Error("No se pudo guardar el PDF" + ((e2 && e2.message) ? ": " + e2.message : ".")); }
+      }
+    } else {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }
     st.textContent = "Listo. El PDF se guardó.";
   } catch (e) {
-    st.className = "status err"; st.textContent = "No se pudo guardar el PDF. Vuelve a intentarlo.";
+    st.className = "status err"; st.textContent = (e && e.message) ? e.message : "No se pudo guardar el PDF. Vuelve a intentarlo.";
   } finally { $("pdf").disabled = false; }
 }
 
